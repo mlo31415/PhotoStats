@@ -207,22 +207,36 @@ def _window_is_on_a_monitor(hwnd: int) -> bool:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
+        self.withdraw()  # stay hidden until fully built — prevents init flicker
         self.title("PhotoStats")
         self.geometry("820x750")
         self.minsize(640, 600)
         self.resizable(True, True)
 
-        # Load params file first — show error and exit if missing/invalid
+        # State is loaded early so geometry is available for any prompt dialog
+        self.state_data = load_state()
+
+        # Resolve the startup position once so both the params dialog and the
+        # main window use exactly the same location.
+        self._win_x, self._win_y, self._win_w, self._win_h = self._resolve_startup_geometry()
+
+        # Load params file; if missing or incomplete, prompt the user
         try:
             self.params = load_params()
-        except (FileNotFoundError, ValueError) as e:
-            # Must show window briefly to display messagebox
-            self.withdraw()
-            messagebox.showerror("Configuration Error", str(e))
-            self.destroy()
-            return
+        except (FileNotFoundError, ValueError):
+            existing = {}
+            if PARAMS_FILE.exists():
+                try:
+                    with open(PARAMS_FILE) as f:
+                        existing = json.load(f)
+                except Exception:
+                    pass
+            params = self._prompt_missing_params(existing)
+            if params is None:
+                self.destroy()
+                return
+            self.params = params
 
-        self.state_data = load_state()
         self._report_data = []
         self._current_fig = None
         self._client = None
@@ -231,6 +245,79 @@ class App(tk.Tk):
         self.update_idletasks()
         self._restore_geometry()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.deiconify()  # show the fully-built window
+
+    # ── Parameters dialog ────────────────────────────────────────────────
+
+    def _prompt_missing_params(self, existing: dict):
+        """Show a modal dialog to collect missing connection parameters.
+        Saves the params file on confirmation. Returns the params dict,
+        or None if the user cancelled."""
+        out = [None]
+
+        dlg = tk.Toplevel(self)
+        dlg.title("PhotoStats — Connection Setup")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        pad = {"padx": 8, "pady": 4}
+        frm = ttk.Frame(dlg, padding=16)
+        frm.pack(fill="both", expand=True)
+
+        ttk.Label(frm, text="Piwigo URL:").grid(row=0, column=0, sticky="e", **pad)
+        var_url = tk.StringVar(value=existing.get("url", ""))
+        ttk.Entry(frm, textvariable=var_url, width=36).grid(row=0, column=1, sticky="w", **pad)
+
+        ttk.Label(frm, text="Username:").grid(row=1, column=0, sticky="e", **pad)
+        var_user = tk.StringVar(value=existing.get("username", ""))
+        ttk.Entry(frm, textvariable=var_user, width=36).grid(row=1, column=1, sticky="w", **pad)
+
+        ttk.Label(frm, text="Password:").grid(row=2, column=0, sticky="e", **pad)
+        var_pwd = tk.StringVar(value=existing.get("password", ""))
+        ttk.Entry(frm, textvariable=var_pwd, width=36, show="*").grid(row=2, column=1, sticky="w", **pad)
+
+        var_ssl = tk.BooleanVar(value=existing.get("verify_ssl", False))
+        ttk.Checkbutton(frm, text="Verify SSL certificate", variable=var_ssl).grid(
+            row=3, column=1, sticky="w", **pad)
+
+        def on_ok():
+            url = var_url.get().strip()
+            username = var_user.get().strip()
+            password = var_pwd.get()
+            missing = [k for k, v in [("url", url), ("username", username), ("password", password)] if not v]
+            if missing:
+                messagebox.showerror("Missing fields",
+                                     f"Please fill in: {', '.join(missing)}", parent=dlg)
+                return
+            params = {"url": url, "username": username,
+                      "password": password, "verify_ssl": var_ssl.get()}
+            with open(PARAMS_FILE, "w") as f:
+                json.dump(params, f, indent=2)
+            out[0] = params
+            dlg.destroy()
+
+        def on_cancel():
+            dlg.destroy()
+
+        btn_row = ttk.Frame(frm)
+        btn_row.grid(row=4, column=0, columnspan=2, pady=(8, 0))
+        ttk.Button(btn_row, text="OK", command=on_ok, width=10).pack(side="left", padx=4)
+        ttk.Button(btn_row, text="Cancel", command=on_cancel, width=10).pack(side="left", padx=4)
+
+        dlg.bind("<Return>", lambda _: on_ok())
+        dlg.bind("<Escape>", lambda _: on_cancel())
+
+        # Centre the dialog within the area the main window will occupy,
+        # using the position resolved once at startup.
+        dlg.update_idletasks()
+        dlg_w = dlg.winfo_reqwidth()
+        dlg_h = dlg.winfo_reqheight()
+        x = self._win_x + (self._win_w - dlg_w) // 2
+        y = self._win_y + (self._win_h - dlg_h) // 2
+        dlg.geometry(f"+{x}+{y}")
+
+        self.wait_window(dlg)
+        return out[0]
 
     # ── UI Construction ──────────────────────────────────────────────────
 
@@ -322,39 +409,38 @@ class App(tk.Tk):
 
     # ── Window geometry ───────────────────────────────────────────────────
 
-    def _restore_geometry(self):
-        """Restore saved window geometry.
+    def _resolve_startup_geometry(self):
+        """Parse the saved geometry string and return (x, y, w, h).
 
-        Applies the saved position as-is (so multi-monitor layouts are honoured
-        exactly), then checks via the Windows API whether the window landed on
-        any real monitor.  If it didn't (e.g. the monitor it was on has been
-        unplugged), the window is moved to the top-left of the primary screen
-        while keeping the saved size.
+        Returns the saved values if present, otherwise sensible defaults.
+        The position is not validated against connected monitors here —
+        that happens later in _restore_geometry once the window is visible.
         """
-        geom = self.state_data.get("geometry")
-        if not geom:
-            return
-        # Tk uses "+-N" for negative absolute coords; normalise to plain integers
-        # so we can reconstruct a geometry string that won't be misread.
-        # IMPORTANT: do NOT pass "-N" directly to self.geometry() — Tk interprets
-        # that as "N px from the right edge", not as the absolute coordinate -N.
+        geom = self.state_data.get("geometry", "")
         normalised = geom.replace("+-", "-").replace("--", "+")
         m = re.fullmatch(r'(\d+)x(\d+)([+-]\d+)([+-]\d+)', normalised)
-        if not m:
-            return
-        w, h, x, y = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+        if m:
+            return int(m.group(3)), int(m.group(4)), int(m.group(1)), int(m.group(2))
+        return 100, 100, 820, 750  # defaults when no geometry is saved
 
-        # Reconstruct with "+{int}" so that negative values become "+-N",
-        # which Tk correctly interprets as the absolute coordinate -N.
+    def _restore_geometry(self):
+        """Apply the pre-resolved startup position/size to the main window.
+
+        Uses the values computed by _resolve_startup_geometry so that the
+        position is determined in exactly one place.  If the window lands
+        off all connected monitors (e.g. a previously-used monitor has been
+        unplugged) it is snapped to the primary screen instead.
+        """
+        if not self.state_data.get("geometry"):
+            return
+        x, y, w, h = self._win_x, self._win_y, self._win_w, self._win_h
         self.geometry(f"{w}x{h}+{x}+{y}")
         self.update_idletasks()
 
         # If the window is completely off all connected monitors, snap it home
         if not _window_is_on_a_monitor(self.winfo_id()):
             min_w, min_h = self.minsize()
-            w = max(w, min_w)
-            h = max(h, min_h)
-            self.geometry(f"{w}x{h}+100+100")
+            self.geometry(f"{max(w, min_w)}x{max(h, min_h)}+100+100")
 
     def _on_close(self):
         self.update_idletasks()
