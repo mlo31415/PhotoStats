@@ -74,7 +74,7 @@ class PiwigoClient:
         elif not url.startswith("https://"):
             url = "https://" + url
         self.base_url = url
-        self.api_url = f"{self.base_url}/ws.php"
+        self.api_url = f"{self.base_url}/ws.php?format=json"
         self.session = requests.Session()
         self.session.verify = verify_ssl
         if not verify_ssl:
@@ -84,7 +84,7 @@ class PiwigoClient:
         self.password = password
 
     def _call(self, method: str, params: dict = None) -> dict:
-        payload = {"method": method, "format": "json"}
+        payload = {"method": method}
         if params:
             payload.update(params)
         r = self.session.post(self.api_url, data=payload, timeout=30)
