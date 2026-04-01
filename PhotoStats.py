@@ -251,6 +251,19 @@ class App(tk.Tk):
 
         conn_frame.columnconfigure(1, weight=1)
 
+        # ── Button row ───────────────────────────────────────────────────
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(fill="x", padx=10, pady=(4, 0))
+
+        self.btn_run = ttk.Button(btn_frame, text="▶  Run Report", command=self._run_report)
+        self.btn_run.pack(side="left", padx=(0, 4))
+
+        self.btn_save = ttk.Button(btn_frame, text="💾  Save Reports", command=self._save_reports, state="disabled")
+        self.btn_save.pack(side="left", padx=4)
+
+        self.btn_export = ttk.Button(btn_frame, text="⬇  Export CSV", command=self._export_csv, state="disabled")
+        self.btn_export.pack(side="left", padx=4)
+
         # ── Date range frame ─────────────────────────────────────────────
         date_frame = ttk.LabelFrame(self, text="Date Range", padding=8)
         date_frame.pack(fill="x", padx=10, pady=4)
@@ -270,15 +283,6 @@ class App(tk.Tk):
         if last_run:
             ttk.Label(date_frame, text=f"Last report run: {last_run[:16]}",
                       foreground="gray").grid(row=0, column=4, padx=12)
-
-        self.btn_run = ttk.Button(date_frame, text="▶  Run Report", command=self._run_report)
-        self.btn_run.grid(row=0, column=5, padx=8)
-
-        self.btn_export = ttk.Button(date_frame, text="⬇  Export CSV", command=self._export_csv, state="disabled")
-        self.btn_export.grid(row=0, column=6, padx=4)
-
-        self.btn_save = ttk.Button(date_frame, text="💾  Save Reports", command=self._save_reports, state="disabled")
-        self.btn_save.grid(row=0, column=7, padx=4)
 
         # ── Progress ─────────────────────────────────────────────────────
         self.var_progress = tk.StringVar(value="")
