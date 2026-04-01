@@ -24,7 +24,7 @@ import matplotlib.ticker as mticker
 
 # ── Config / persistence ────────────────────────────────────────────────────
 
-STATE_FILE = Path.home() / ".photostats_state.json"
+STATE_FILE = Path(__file__).parent / "PhotoStats State.json"
 
 # Params file lives next to the script
 PARAMS_FILE = Path(__file__).parent / "PhotoStats Params.json"
@@ -192,26 +192,14 @@ def build_report(client: PiwigoClient, start_dt: datetime, end_dt: datetime,
 
 # ── Window geometry helpers ──────────────────────────────────────────────────
 
-def _get_monitor_rects():
-    """Return list of (left, top, right, bottom) for every connected monitor."""
-    monitors = []
+def _window_is_on_a_monitor(hwnd: int) -> bool:
+    """Return True if any part of the window is on a connected monitor."""
     try:
         import ctypes
-        import ctypes.wintypes
-        MonitorEnumProc = ctypes.WINFUNCTYPE(
-            ctypes.c_bool,
-            ctypes.c_ulong, ctypes.c_ulong,
-            ctypes.POINTER(ctypes.wintypes.RECT),
-            ctypes.c_double,
-        )
-        def _cb(hMon, hdcMon, lprc, data):
-            r = lprc.contents
-            monitors.append((r.left, r.top, r.right, r.bottom))
-            return 1
-        ctypes.windll.user32.EnumDisplayMonitors(None, None, MonitorEnumProc(_cb), 0)
+        MONITOR_DEFAULTTONULL = 0
+        return bool(ctypes.windll.user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL))
     except Exception:
-        pass
-    return monitors
+        return True  # assume visible if the API fails
 
 
 # ── Main Application ─────────────────────────────────────────────────────────
@@ -325,45 +313,46 @@ class App(tk.Tk):
     # ── Window geometry ───────────────────────────────────────────────────
 
     def _restore_geometry(self):
-        """Restore saved window geometry, clamping fully onto visible screens."""
+        """Restore saved window geometry.
+
+        Applies the saved position as-is (so multi-monitor layouts are honoured
+        exactly), then checks via the Windows API whether the window landed on
+        any real monitor.  If it didn't (e.g. the monitor it was on has been
+        unplugged), the window is moved to the top-left of the primary screen
+        while keeping the saved size.
+        """
         geom = self.state_data.get("geometry")
         if not geom:
             return
-        m = re.fullmatch(r'(\d+)x(\d+)([+-]\d+)([+-]\d+)', geom)
+        # Tk uses "+-N" for negative absolute coords; normalise to plain integers
+        # so we can reconstruct a geometry string that won't be misread.
+        # IMPORTANT: do NOT pass "-N" directly to self.geometry() — Tk interprets
+        # that as "N px from the right edge", not as the absolute coordinate -N.
+        normalised = geom.replace("+-", "-").replace("--", "+")
+        m = re.fullmatch(r'(\d+)x(\d+)([+-]\d+)([+-]\d+)', normalised)
         if not m:
             return
         w, h, x, y = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
 
-        monitors = _get_monitor_rects()
-        if not monitors:
-            monitors = [(0, 0, self.winfo_screenwidth(), self.winfo_screenheight())]
-
-        min_w, min_h = self.minsize()
-        w = max(w, min_w)
-        h = max(h, min_h)
-
-        # Pick the monitor with the greatest overlap with the saved position
-        best_mon = monitors[0]
-        best_area = -1
-        for mon in monitors:
-            ml, mt, mr, mb = mon
-            ox = max(0, min(x + w, mr) - max(x, ml))
-            oy = max(0, min(y + h, mb) - max(y, mt))
-            if ox * oy > best_area:
-                best_area = ox * oy
-                best_mon = mon
-        ml, mt, mr, mb = best_mon
-
-        # Clamp size then position so the window sits entirely on that monitor
-        w = min(w, mr - ml)
-        h = min(h, mb - mt)
-        x = max(ml, min(x, mr - w))
-        y = max(mt, min(y, mb - h))
-
+        # Reconstruct with "+{int}" so that negative values become "+-N",
+        # which Tk correctly interprets as the absolute coordinate -N.
         self.geometry(f"{w}x{h}+{x}+{y}")
+        self.update_idletasks()
+
+        # If the window is completely off all connected monitors, snap it home
+        if not _window_is_on_a_monitor(self.winfo_id()):
+            min_w, min_h = self.minsize()
+            w = max(w, min_w)
+            h = max(h, min_h)
+            self.geometry(f"{w}x{h}+100+100")
 
     def _on_close(self):
-        self.state_data["geometry"] = self.geometry()
+        self.update_idletasks()
+        # Save as "+{int}" format (same as _restore_geometry uses) so the saved
+        # string is unambiguous regardless of what Tk emits on this platform.
+        x, y = self.winfo_x(), self.winfo_y()
+        w, h = self.winfo_width(), self.winfo_height()
+        self.state_data["geometry"] = f"{w}x{h}+{x}+{y}"
         save_state(self.state_data)
         self.destroy()
 
