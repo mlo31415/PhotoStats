@@ -224,6 +224,7 @@ class App(tk.Tk):
 
         self.state_data = load_state()
         self._report_data = []
+        self._current_fig = None
         self._client = None
 
         self._build_ui()
@@ -275,6 +276,9 @@ class App(tk.Tk):
 
         self.btn_export = ttk.Button(date_frame, text="⬇  Export CSV", command=self._export_csv, state="disabled")
         self.btn_export.grid(row=0, column=6, padx=4)
+
+        self.btn_save = ttk.Button(date_frame, text="💾  Save Reports", command=self._save_reports, state="disabled")
+        self.btn_save.grid(row=0, column=7, padx=4)
 
         # ── Progress ─────────────────────────────────────────────────────
         self.var_progress = tk.StringVar(value="")
@@ -379,6 +383,7 @@ class App(tk.Tk):
 
         self.btn_run.config(state="disabled")
         self.btn_export.config(state="disabled")
+        self.btn_save.config(state="disabled")
         self._clear_results()
 
         def worker():
@@ -418,6 +423,9 @@ class App(tk.Tk):
             self.tree.delete(row)
         for w in self.tab_chart.winfo_children():
             w.destroy()
+        if self._current_fig is not None:
+            plt.close(self._current_fig)
+            self._current_fig = None
 
     def _display_results(self, data: list):
         self._report_data = data
@@ -425,6 +433,7 @@ class App(tk.Tk):
         self._populate_chart(data)
         self.btn_run.config(state="normal")
         self.btn_export.config(state="normal")
+        self.btn_save.config(state="normal")
         self._update_progress(1, 1,
             f"Report complete — {sum(r['count'] for r in data)} photos across {len(data)} albums.")
 
@@ -459,7 +468,7 @@ class App(tk.Tk):
 
         if not data:
             ttk.Label(self.tab_chart, text="No data to display.", foreground="gray").pack(expand=True)
-            return
+            return None
 
         # Show top 20 albums for readability
         top = data[:20]
@@ -481,7 +490,32 @@ class App(tk.Tk):
         canvas = FigureCanvasTkAgg(fig, master=self.tab_chart)
         canvas.draw()
         canvas.get_tk_widget().pack(fill="both", expand=True)
-        plt.close(fig)
+        self._current_fig = fig
+
+    # ── Save Reports ─────────────────────────────────────────────────────
+
+    def _save_reports(self):
+        if not self._report_data:
+            return
+        import csv
+        stem = f"PhotoStats {self.var_start.get()} to {self.var_end.get()}"
+        out_dir = Path(__file__).parent
+
+        csv_path = out_dir / f"{stem}.csv"
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Album", "Photos Added", "Photo Name", "Date Added"])
+            for row in self._report_data:
+                for photo in row["photos"]:
+                    writer.writerow([row["album_name"], row["count"],
+                                     photo["name"], photo["date"]])
+
+        png_path = out_dir / f"{stem}.png"
+        if self._current_fig is not None:
+            self._current_fig.savefig(png_path, dpi=150, bbox_inches="tight")
+            messagebox.showinfo("Saved", f"Reports saved to:\n{csv_path}\n{png_path}")
+        else:
+            messagebox.showinfo("Saved", f"Report saved to:\n{csv_path}")
 
     # ── Export CSV ───────────────────────────────────────────────────────
 
