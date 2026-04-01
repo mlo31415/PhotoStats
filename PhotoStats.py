@@ -24,10 +24,10 @@ import matplotlib.ticker as mticker
 
 # ── Config / persistence ────────────────────────────────────────────────────
 
-STATE_FILE = Path(__file__).parent / "PhotoStats State.json"
+STATE_FILE = Path(".") / "PhotoStats State.json"
 
 # Params file lives next to the script
-PARAMS_FILE = Path(__file__).parent / "PhotoStats Params.json"
+PARAMS_FILE = Path(".") / "PhotoStats Params.json"
 
 REQUIRED_PARAMS = ("url", "username", "password")
 
@@ -591,7 +591,7 @@ class App(tk.Tk):
             return
         import csv
         stem = f"PhotoStats {self.var_start.get()} to {self.var_end.get()}"
-        out_dir = Path(__file__).parent
+        out_dir = Path(".")
 
         csv_path = out_dir / f"{stem}.csv"
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
