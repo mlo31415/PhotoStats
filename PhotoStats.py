@@ -264,6 +264,8 @@ class App(tk.Tk):
         self.btn_export = ttk.Button(btn_frame, text="⬇  Export CSV", command=self._export_csv, state="disabled")
         self.btn_export.pack(side="left", padx=4)
 
+        ttk.Button(btn_frame, text="✕  Exit", command=self._on_close).pack(side="left", padx=4)
+
         # ── Date range frame ─────────────────────────────────────────────
         date_frame = ttk.LabelFrame(self, text="Date Range", padding=8)
         date_frame.pack(fill="x", padx=10, pady=4)
