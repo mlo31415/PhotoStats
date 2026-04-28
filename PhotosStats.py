@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PhotoStats
+PhotosStats
 A Tkinter desktop app that connects to a Piwigo instance and reports
 on photos added to albums within a selected date range.
 Last-run date is persisted to a local JSON file.
@@ -24,19 +24,19 @@ import matplotlib.ticker as mticker
 
 # ── Config / persistence ────────────────────────────────────────────────────
 
-STATE_FILE = Path(".") / "PhotoStats State.json"
+STATE_FILE = Path(".") / "PhotosStats State.json"
 
 # Params file lives next to the script
-PARAMS_FILE = Path(".") / "PhotoStats Params.json"
+PARAMS_FILE = Path(".") / "PhotosStats Params.json"
 
 REQUIRED_PARAMS = ("url", "username", "password")
 
 def load_params() -> dict:
-    """Load connection parameters from PhotoStats Params.json."""
+    """Load connection parameters from PhotosStats Params.json."""
     if not PARAMS_FILE.exists():
         raise FileNotFoundError(
             f"Parameters file not found: {PARAMS_FILE}\n\n"
-            "Please create PhotoStats Params.json next to this script with:\n"
+            "Please create PhotosStats Params.json next to this script with:\n"
             '{\n'
             '  "url": "https://your-piwigo-site.example.com",\n'
             '  "username": "your-username-here",\n'
@@ -48,7 +48,7 @@ def load_params() -> dict:
         params = json.load(f)
     missing = [k for k in REQUIRED_PARAMS if not params.get(k)]
     if missing:
-        raise ValueError(f"Missing required fields in PhotoStats Params.json: {', '.join(missing)}")
+        raise ValueError(f"Missing required fields in PhotosStats Params.json: {', '.join(missing)}")
     return params
 
 def load_state() -> dict:
@@ -208,7 +208,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.withdraw()  # stay hidden until fully built — prevents init flicker
-        self.title("PhotoStats")
+        self.title("PhotosStats")
         self.geometry("820x750")
         self.minsize(640, 600)
         self.resizable(True, True)
@@ -256,7 +256,7 @@ class App(tk.Tk):
         out = [None]
 
         dlg = tk.Toplevel(self)
-        dlg.title("PhotoStats — Connection Setup")
+        dlg.title("PhotosStats — Connection Setup")
         dlg.resizable(False, False)
         dlg.grab_set()
 
@@ -387,12 +387,13 @@ class App(tk.Tk):
         tab_table = ttk.Frame(self.notebook)
         self.notebook.add(tab_table, text="📋  Table")
 
-        cols = ("Album", "Photos Added")
+        cols = ("Album ID", "Album", "Photos Added")
         self.tree = ttk.Treeview(tab_table, columns=cols, show="headings", selectmode="browse")
+        col_cfg = {"Album ID": (80, "center"), "Album": (460, "w"), "Photos Added": (120, "center")}
         for col in cols:
             self.tree.heading(col, text=col, command=lambda c=col: self._sort_tree(c))
-            self.tree.column(col, anchor="w" if col == "Album" else "center",
-                             width=500 if col == "Album" else 120)
+            w, anchor = col_cfg[col]
+            self.tree.column(col, anchor=anchor, width=w)
         vsb = ttk.Scrollbar(tab_table, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -534,7 +535,7 @@ class App(tk.Tk):
     def _populate_table(self, data: list):
         self._sort_col = None
         for row in data:
-            self.tree.insert("", "end", values=(row["album_name"], row["count"]))
+            self.tree.insert("", "end", values=(row["album_id"], row["album_name"], row["count"]))
 
     def _sort_tree(self, col):
         rows = [(self.tree.set(k, col), k) for k in self.tree.get_children("")]
@@ -590,16 +591,16 @@ class App(tk.Tk):
         if not self._report_data:
             return
         import csv
-        stem = f"PhotoStats {self.var_start.get()} to {self.var_end.get()}"
+        stem = f"PhotosStats {self.var_start.get()} to {self.var_end.get()}"
         out_dir = Path(".")
 
         csv_path = out_dir / f"{stem}.csv"
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["Album", "Photos Added", "Photo Name", "Date Added"])
+            writer.writerow(["Album ID", "Album", "Photos Added", "Photo Name", "Date Added"])
             for row in self._report_data:
                 for photo in row["photos"]:
-                    writer.writerow([row["album_name"], row["count"],
+                    writer.writerow([row["album_id"], row["album_name"], row["count"],
                                      photo["name"], photo["date"]])
 
         png_path = out_dir / f"{stem}.png"
@@ -617,17 +618,17 @@ class App(tk.Tk):
         path = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            initialfile=f"PhotoStats_{date.today().isoformat()}.csv"
+            initialfile=f"PhotosStats_{date.today().isoformat()}.csv"
         )
         if not path:
             return
         import csv
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["Album", "Photos Added", "Photo Name", "Date Added"])
+            writer.writerow(["Album ID", "Album", "Photos Added", "Photo Name", "Date Added"])
             for row in self._report_data:
                 for photo in row["photos"]:
-                    writer.writerow([row["album_name"], row["count"],
+                    writer.writerow([row["album_id"], row["album_name"], row["count"],
                                      photo["name"], photo["date"]])
         messagebox.showinfo("Exported", f"Report saved to:\n{path}")
 
