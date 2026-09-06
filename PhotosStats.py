@@ -9,7 +9,6 @@ Last-run date is persisted to a local JSON file.
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import json
-import os
 import re
 import sys
 import threading
@@ -26,30 +25,24 @@ import matplotlib.ticker as mticker
 
 STATE_FILE = Path(".") / "PhotosStats State.json"
 
-# Params file lives next to the script
-PARAMS_FILE = Path(".") / "PhotosStats Params.json"
+# The url, username and password live in Piwigo Credentials.json, the same file
+# and the same reader the other Piwigo programs use, rather than in the params
+# file beside the other settings.  CredentialStore migrates them out of an older
+# params file on the first run and strips them from it.  It is looked for beside
+# this script, not in the working directory, so the program can be started from
+# anywhere.
+_SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(_SCRIPT_DIR.parent / "PiwigoHelpers"))
+from CredentialStore import CredentialStore, CredentialError   # noqa: E402
 
-REQUIRED_PARAMS = ("url", "username", "password")
+PARAMS_FILE = _SCRIPT_DIR / "PhotosStats Params.json"
+CREDS_FILE  = _SCRIPT_DIR / "Piwigo Credentials.json"
+_store      = CredentialStore(_SCRIPT_DIR, PARAMS_FILE.name)
+
 
 def load_params() -> dict:
-    """Load connection parameters from PhotosStats Params.json."""
-    if not PARAMS_FILE.exists():
-        raise FileNotFoundError(
-            f"Parameters file not found: {PARAMS_FILE}\n\n"
-            "Please create PhotosStats Params.json next to this script with:\n"
-            '{\n'
-            '  "url": "https://your-piwigo-site.example.com",\n'
-            '  "username": "your-username-here",\n'
-            '  "password": "your-password-here",\n'
-            '  "verify_ssl": false\n'
-            '}'
-        )
-    with open(PARAMS_FILE) as f:
-        params = json.load(f)
-    missing = [k for k in REQUIRED_PARAMS if not params.get(k)]
-    if missing:
-        raise ValueError(f"Missing required fields in PhotosStats Params.json: {', '.join(missing)}")
-    return params
+    """The Piwigo connection settings, from the credentials file."""
+    return _store.load_credentials()
 
 def load_state() -> dict:
     if STATE_FILE.exists():
@@ -220,17 +213,18 @@ class App(tk.Tk):
         # main window use exactly the same location.
         self._win_x, self._win_y, self._win_w, self._win_h = self._resolve_startup_geometry()
 
-        # Load params file; if missing or incomplete, prompt the user
+        # Load the credentials; if missing or incomplete, prompt the user
         try:
             self.params = load_params()
-        except (FileNotFoundError, ValueError):
+        except (CredentialError, FileNotFoundError, ValueError):
             existing = {}
-            if PARAMS_FILE.exists():
-                try:
-                    with open(PARAMS_FILE) as f:
-                        existing = json.load(f)
-                except Exception:
-                    pass
+            for source in (CREDS_FILE, PARAMS_FILE):
+                if source.exists():
+                    try:
+                        existing = json.load(open(source, encoding="utf-8"))
+                        break
+                    except Exception:
+                        pass
             params = self._prompt_missing_params(existing)
             if params is None:
                 self.destroy()
@@ -291,8 +285,7 @@ class App(tk.Tk):
                 return
             params = {"url": url, "username": username,
                       "password": password, "verify_ssl": var_ssl.get()}
-            with open(PARAMS_FILE, "w") as f:
-                json.dump(params, f, indent=2)
+            _store.save_credentials(params)     # never the params file
             out[0] = params
             dlg.destroy()
 

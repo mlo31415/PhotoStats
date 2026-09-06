@@ -1,0 +1,25 @@
+# Secrets and per-user config -- never commit
+Piwigo Credentials.json
+PhotosStats Params.json
+
+# Python virtual environment
+.venv/
+
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+
+# PyInstaller build artifacts
+build/
+dist/
+*.exe
+
+# IDE
+.idea/
+
+# Runtime / per-user state
+PhotosStats State.json
+
+# Generated reports
+PhotosStats*.csv
+PhotosStats*.png
